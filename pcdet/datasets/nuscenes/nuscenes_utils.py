@@ -6,6 +6,9 @@ https://github.com/traveller59/second.pytorch and https://github.com/poodarchu/D
 import operator
 from functools import reduce
 from pathlib import Path
+import pdb
+import copy
+import os
 
 import numpy as np
 import tqdm
@@ -248,8 +251,124 @@ def quaternion_yaw(q: Quaternion) -> float:
 
     return yaw
 
+def get_radar_data(nusc, nusc_can, sample, sweeps, sweep_version):
+    from nuscenes.utils.data_classes import RadarPointCloud
+    from pyquaternion import Quaternion
+    from nuscenes.utils.geometry_utils import transform_matrix
 
-def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test=False, max_sweeps=10):
+    radar_channels = ['RADAR_FRONT', 'RADAR_FRONT_RIGHT', 'RADAR_FRONT_LEFT',
+                      'RADAR_BACK_RIGHT', 'RADAR_BACK_LEFT']
+    
+    scene_ = nusc.get('scene', sample['scene_token'])
+    scenes_first_sample_token = scene_['first_sample_token']
+
+    points = np.zeros((18, 0))
+
+    sd_lidar = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
+    cs_lidar = nusc.get('calibrated_sensor', sd_lidar['calibrated_sensor_token'])
+    pose_lidar = nusc.get('ego_pose', sd_lidar['ego_pose_token'])
+    
+    # CAN Data Utilization
+    scene = nusc.get('scene', sample['scene_token'])
+    scene_name = scene['name']
+    scene_pose = nusc_can.get_messages(scene_name, 'pose')
+    utimes = np.array([m['utime'] for m in scene_pose])
+    vel_data = np.array([m['vel'][0] for m in scene_pose])
+    yaw_rate = np.array([m['rotation_rate'][2] for m in scene_pose])
+
+    l2e_t = cs_lidar['translation']
+    l2e_r = cs_lidar['rotation']
+    e2g_t = pose_lidar['translation']
+    e2g_r = pose_lidar['rotation']
+    l2e_r_mat = Quaternion(l2e_r).rotation_matrix
+    e2g_r_mat = Quaternion(e2g_r).rotation_matrix
+
+    for radar_channel in radar_channels:
+        radar_sd_token = sample['data'][radar_channel]
+        sd_radar = nusc.get('sample_data', radar_sd_token)
+        radar_ref_time = sd_radar['timestamp']
+        for _ in range(sweeps):
+            radar_path = nusc.dataroot / sd_radar['filename']
+            cs_radar = nusc.get('calibrated_sensor', sd_radar['calibrated_sensor_token'])
+            pose_radar = nusc.get('ego_pose', sd_radar['ego_pose_token'])
+            time_gap = (radar_ref_time - sd_radar['timestamp']) * 1e-6
+
+            new_time = np.abs(utimes - radar_ref_time)
+            time_idx = np.argmin(new_time)
+
+            current_from_car = transform_matrix(
+                                   [0, 0, 0], Quaternion(cs_radar['rotation']), inverse=True
+                               )[0:2, 0:2]
+            vel_data[time_idx] = np.around(vel_data[time_idx], 10)
+            vehicle_v = np.array((vel_data[time_idx]* np.cos(yaw_rate[time_idx]), 
+                                  vel_data[time_idx]*np.sin(yaw_rate[time_idx])))
+            final_v = np.dot(current_from_car, vehicle_v)
+
+            current_pc = RadarPointCloud.from_file(str(radar_path)).points.T
+            if sweep_version in ['version3', 'versionx3']:
+                version3_pc = copy.deepcopy(current_pc)
+                if sweep_version == 'version3':
+                    current_pc[:, 8:10] = final_v[0:2] + current_pc[:, 6:8]
+                else:
+                    version3_pc[:, 8:10] = final_v[0:2] + version3_pc[:, 6:8]
+            versionx3_pc = copy.deepcopy(current_pc)
+            if sweep_version in ['version1']:
+                pass
+            if sweep_version in ['version2', 'versionx3']:
+                current_pc[:, :2] += current_pc[:, 8:10] * time_gap
+                versionx3_pc = np.vstack((versionx3_pc, current_pc))
+            if sweep_version in ['version3', 'versionx3']:
+                if sweep_version == 'version3':
+                    current_pc[:, :2] += current_pc[:, 8:10] * time_gap
+                else:
+                    version3_pc[:, :2] += version3_pc[:, 8:10] * time_gap
+                    versionx3_pc = np.vstack((versionx3_pc, version3_pc))
+            
+            # [SPA Lab Added] Radar Point to Lidar Top Coordinate
+            r2e_r_s = cs_radar['rotation']
+            r2e_t_s = cs_radar['translation']
+            e2g_r_s = pose_radar['rotation']
+            e2g_t_s = pose_radar['translation']
+            r2e_r_s_mat = Quaternion(r2e_r_s).rotation_matrix
+            e2g_r_s_mat = Quaternion(e2g_r_s).rotation_matrix
+
+            R = (r2e_r_s_mat.T @ e2g_r_s_mat.T) @ (np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T)
+            T = (r2e_t_s @ e2g_r_s_mat.T + e2g_t_s) @ (np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T)
+            T -= e2g_t @ (np.linalg.inv(e2g_r_mat).T @ np.linalg.inv(l2e_r_mat).T) + l2e_t @ np.linalg.inv(l2e_r_mat).T
+
+            if sweep_version in ['version1', 'version2', 'version3']:
+                current_pc[:, :3] = current_pc[:, :3] @ R
+                current_pc[:, [8, 9]] = current_pc[:, [8, 9]] @ R[:2, :2]
+                current_pc[:, :3] += T
+            elif sweep_version in ['versionx3']:
+                versionx3_pc[:, :3] = versionx3_pc[:, :3]
+                versionx3_pc[:, [8, 9]] = versionx3_pc[:, [8, 9]] @ R[:2, :2]
+                versionx3_pc[:, :3] += T
+            else:
+                raise NotImplementedError
+            
+            if sample['prev'] == '' or sample['prev'] == scenes_first_sample_token:
+                if sd_radar['next'] == '':
+                    break
+                else:
+                    sd_radar = nusc.get('sample_data', sd_radar['next'])
+            else:
+                if sd_radar['prev'] == '':
+                    break
+                else:
+                    sd_radar = nusc.get('sample_data', sd_radar['prev'])
+
+    if sweep_version in ['version1', 'version2', 'version3', 'versionx3']:
+        use_idx = [0, 1, 2, 5, 8, 9]
+    else:
+        raise NotImplementedError
+    all_pc = all_pc[:, use_idx]
+    pdb.set_trace()
+    return all_pc
+
+
+def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test, max_sweeps,
+                        sweep_version, modality, nusc_can):
     train_nusc_infos = []
     val_nusc_infos = []
     progress_bar = tqdm.tqdm(total=len(nusc.sample), desc='create_info', dynamic_ncols=True)
@@ -259,6 +378,30 @@ def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test=False, m
 
     for index, sample in enumerate(nusc.sample):
         progress_bar.update()
+
+        lidar_token = sample['data']['LIDAR_TOP']
+        cam_front_token = sample['data']['CAM_FRONT']
+        radar_front_token = sample['data']['RADAR_FRONT']
+
+        sd_lidar = nusc.get('sample_data', lidar_token)
+        cs_lidar = nusc.get('calibrated_sensor', sd_lidar['calibrated_sensor_token'])
+        pose_lidar = nusc.get('ego_pose', sd_lidar['ego_pose_token'])
+
+        lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
+        cam_path, _, _ = nusc.get_sample_data(cam_front_token)
+        radar_path, _, _ = nusc.get_sample_data(radar_front_token)
+
+        # [SPALAB Added] Make Radar Sweep Files
+        if modality == 'radar':
+            radar_sweep_path = radar_path.split('/')
+            radar_sweep_path[-2] = 'RADAR_' + sweep_version + '_' + str(max_sweeps) + 'Sweeps'
+            radar_sweep_path[-1] = radar_sweep_path[-1].split('.')[0] + '.npy'
+            radar_sweep_path = '/'.join(radar_sweep_path)
+            dir_data = '/'.join(radar_sweep_path.split('/')[:-1])
+            if not os.path.exists(dir_data):
+                os.mkdir(dir_data)
+            radar_npy = get_radar_data(nusc, nusc_can, sample, max_sweeps, sweep_version)
+            np.save(radar_sweep_path, radar_npy)
 
         ref_sd_token = sample['data'][ref_chan]
         ref_sd_rec = nusc.get('sample_data', ref_sd_token)

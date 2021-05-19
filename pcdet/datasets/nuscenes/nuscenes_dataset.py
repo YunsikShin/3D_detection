@@ -1,6 +1,7 @@
 import copy
 import pickle
 from pathlib import Path
+import pdb
 
 import numpy as np
 from tqdm import tqdm
@@ -296,8 +297,9 @@ class NuScenesDataset(DatasetTemplate):
             pickle.dump(all_db_infos, f)
 
 
-def create_nuscenes_info(version, data_path, save_path, max_sweeps=10):
+def create_nuscenes_info(modality, version, sweep_version, max_sweeps, data_path, save_path):
     from nuscenes.nuscenes import NuScenes
+    from nuscenes.can_bus.can_bus_api import NuScenesCanBus
     from nuscenes.utils import splits
     from . import nuscenes_utils
     data_path = data_path / version
@@ -317,6 +319,7 @@ def create_nuscenes_info(version, data_path, save_path, max_sweeps=10):
         raise NotImplementedError
 
     nusc = NuScenes(version=version, dataroot=data_path, verbose=True)
+    nusc_can = NuScenesCanBus(dataroot=data_path)
     available_scenes = nuscenes_utils.get_available_scenes(nusc)
     available_scene_names = [s['name'] for s in available_scenes]
     train_scenes = list(filter(lambda x: x in available_scene_names, train_scenes))
@@ -328,7 +331,8 @@ def create_nuscenes_info(version, data_path, save_path, max_sweeps=10):
 
     train_nusc_infos, val_nusc_infos = nuscenes_utils.fill_trainval_infos(
         data_path=data_path, nusc=nusc, train_scenes=train_scenes, val_scenes=val_scenes,
-        test='test' in version, max_sweeps=max_sweeps
+        test='test' in version, max_sweeps=max_sweeps, sweep_version=sweep_version,
+        modality=modality, nusc_can=nusc_can
     )
 
     if version == 'v1.0-test':
@@ -353,22 +357,46 @@ if __name__ == '__main__':
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config of dataset')
     parser.add_argument('--func', type=str, default='create_nuscenes_infos', help='')
     parser.add_argument('--version', type=str, default='v1.0-trainval', help='')
-    args = parser.parse_args()
 
-    if args.func == 'create_nuscenes_infos':
-        dataset_cfg = EasyDict(yaml.load(open(args.cfg_file)))
-        ROOT_DIR = (Path(__file__).resolve().parent / '../../../').resolve()
-        dataset_cfg.VERSION = args.version
+    parser.add_argument('--modality', type=str, default='radar')
+    parser.add_argument('--max_sweeps', type=int, default=13)
+    parser.add_argument('--sweep_version', type=str, default='version1')
+    parser.add_argument('--dir_data', type=str, default='/mnt/mnt/sdd/ysshin/nuscenes')
+    flags = parser.parse_args()
+
+    if flags.func == 'create_nuscenes_infos':
+        dataset_cfg = EasyDict(yaml.load(open(flags.cfg_file)))
+        ROOT_DIR = Path(flags.dir_data)
+
+        modality = flags.modality
+        sweep_version = flags.sweep_version
+        max_sweeps = flags.max_sweeps
+       
+        dir_infos_train = f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_train.pkl'
+        dir_infos_val = f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_val.pkl'
+
+        dataset_cfg.INFO_PATH = {'train': dir_infos_train, 'test': dir_infos_val}
+        dataset_cfg.VERSION = flags.version
+        dataset_cfg.MODALITY = flags.modality
+        dataset_cfg.MAX_SWEEPS = flags.max_sweeps
+        dataset_cfg.SWEEP_VERSION = flags.sweep_version
+
         create_nuscenes_info(
-            version=dataset_cfg.VERSION,
-            data_path=ROOT_DIR / 'data' / 'nuscenes',
-            save_path=ROOT_DIR / 'data' / 'nuscenes',
-            max_sweeps=dataset_cfg.MAX_SWEEPS,
+            modality=flags.modality,
+            version=flags.version,
+            sweep_version=flags.sweep_version,
+            max_sweeps=flags.max_sweeps,
+            data_path=ROOT_DIR,
+            save_path=ROOT_DIR
         )
 
         nuscenes_dataset = NuScenesDataset(
             dataset_cfg=dataset_cfg, class_names=None,
-            root_path=ROOT_DIR / 'data' / 'nuscenes',
+            root_path=ROOT_DIR,
             logger=common_utils.create_logger(), training=True
         )
-        nuscenes_dataset.create_groundtruth_database(max_sweeps=dataset_cfg.MAX_SWEEPS)
+        nuscenes_dataset.create_groundtruth_database(
+            modality=flags.modality,
+            sweep_version=flags.sweep_version,
+            max_sweeps=flags.max_sweeps
+        )
