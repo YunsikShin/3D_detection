@@ -4,6 +4,7 @@ import glob
 import os
 from pathlib import Path
 from test import repeat_eval_ckpt
+import pdb
 
 import torch
 import torch.distributed as dist
@@ -20,7 +21,14 @@ from train_utils.train_utils import train_model
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
-    parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
+    parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/cbgs_pp_multihead.yaml', help='specify the config for training')
+
+    parser.add_argument('--modality', type=str, default='radar')
+    parser.add_argument('--sweep_version', type=str, default='version2')
+    parser.add_argument('--max_sweeps', type=int, default=13)
+    parser.add_argument('--class_names', type=list, 
+                        default=['car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+                                 'barrier', 'motorcycle', 'bicycle', 'pedestrain', 'traffic_cone'])
 
     parser.add_argument('--batch_size', type=int, default=None, required=False, help='batch size for training')
     parser.add_argument('--epochs', type=int, default=None, required=False, help='number of epochs to train for')
@@ -43,41 +51,84 @@ def parse_config():
     parser.add_argument('--start_epoch', type=int, default=0, help='')
     parser.add_argument('--save_to_file', action='store_true', default=False, help='')
 
-    args = parser.parse_args()
+    flags = parser.parse_args()
 
-    cfg_from_yaml_file(args.cfg_file, cfg)
-    cfg.TAG = Path(args.cfg_file).stem
-    cfg.EXP_GROUP_PATH = '/'.join(args.cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
+    cfg_from_yaml_file(flags.cfg_file, cfg)
+    cfg.TAG = Path(flags.cfg_file).stem
+    cfg.EXP_GROUP_PATH = '/'.join(flags.cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
 
-    if args.set_cfgs is not None:
-        cfg_from_list(args.set_cfgs, cfg)
+    if flags.set_cfgs is not None:
+        cfg_from_list(flags.set_cfgs, cfg)
 
-    return args, cfg
+    return flags, cfg
+
+
+def cfg_update(flags, cfg):
+    class_names = flags.class_names
+    num_class = len(class_names)
+
+    modality = flags.modality
+    max_sweeps = flags.max_sweeps
+    sweep_version = flags.sweep_version
+
+    dir_info_train = f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_train.pkl'
+    dir_info_val = f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_val.pkl'
+    dir_dbinfo = f'nuscenes_dbinfos_{modality}_{sweep_version}_{max_sweeps}sweeps_withvelo.pkl'
+
+    cfg.DATA_CONFIG.MODALITY = modality
+    cfg.DATA_CONFIG.MAX_SWEEPS = max_sweeps
+    cfg.DATA_CONFIG.SWEEP_VERSION = sweep_version
+    cfg.DATA_CONFIG.INFO_PATH = {'train': dir_info_train, 'test': dir_info_val}
+    cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0].DB_INFO_PATH = dir_dbinfo
+
+    ## Re-define CFG w.r.t. num_class
+    PREPARE = cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['PREPARE']
+    #SAMPLE_GROUPS = cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['SAMPLE_GROUPS']
+    #DENSE_HEAD = cfg.MODEL.DENSE_HEAD.ANCHOR_GENERATOR_CONFIG
+    PREPARE_list = []
+    #SAMPLE_GROUPS_list = []
+    #DENSE_HEAD_list = []
+    for i in range(num_class):
+        # DATA_AUGMENTOR
+        item = PREPARE['filter_by_min_points'][i]
+        name, num = item.split(':')
+        if modality == 'radar':
+            num = 1
+        PREPARE_list.append
+        PREPARE_list.append(':'.join([name, str(num)]))
+
+    #    SAMPLE_GROUPS_list.append(SAMPLE_GROUPS[i])
+    #    DENSE_HEAD_list.append(DENSE_HEAD[i])
+    #cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['PREPARE'] = PREPARE_list
+    #cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['SAMPLE_GROUPS'] = SAMPLE_GROUPS_list
+    #cfg.MODEL.DENSE_HEAD.ANCHOR_GENERATOR_CONFIG = DENSE_HEAD_list
+    return cfg
 
 
 def main():
-    args, cfg = parse_config()
-    if args.launcher == 'none':
+    flags, cfg = parse_config()
+    cfg = cfg_update(flags, cfg)
+    if flags.launcher == 'none':
         dist_train = False
         total_gpus = 1
     else:
-        total_gpus, cfg.LOCAL_RANK = getattr(common_utils, 'init_dist_%s' % args.launcher)(
-            args.tcp_port, args.local_rank, backend='nccl'
+        total_gpus, cfg.LOCAL_RANK = getattr(common_utils, 'init_dist_%s' % flags.launcher)(
+            flags.tcp_port, flags.local_rank, backend='nccl'
         )
         dist_train = True
 
-    if args.batch_size is None:
-        args.batch_size = cfg.OPTIMIZATION.BATCH_SIZE_PER_GPU
+    if flags.batch_size is None:
+        flags.batch_size = cfg.OPTIMIZATION.BATCH_SIZE_PER_GPU
     else:
-        assert args.batch_size % total_gpus == 0, 'Batch size should match the number of gpus'
-        args.batch_size = args.batch_size // total_gpus
+        assert flags.batch_size % total_gpus == 0, 'Batch size should match the number of gpus'
+        flags.batch_size = flags.batch_size // total_gpus
 
-    args.epochs = cfg.OPTIMIZATION.NUM_EPOCHS if args.epochs is None else args.epochs
+    flags.epochs = cfg.OPTIMIZATION.NUM_EPOCHS if flags.epochs is None else flags.epochs
 
-    if args.fix_random_seed:
+    if flags.fix_random_seed:
         common_utils.set_random_seed(666)
 
-    output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / args.extra_tag
+    output_dir = Path('/mnt/mnt/ysshin/nuscenes') / 'output' / cfg.TAG / flags.extra_tag
     ckpt_dir = output_dir / 'ckpt'
     output_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -91,12 +142,12 @@ def main():
     logger.info('CUDA_VISIBLE_DEVICES=%s' % gpu_list)
 
     if dist_train:
-        logger.info('total_batch_size: %d' % (total_gpus * args.batch_size))
-    for key, val in vars(args).items():
+        logger.info('total_batch_size: %d' % (total_gpus * flags.batch_size))
+    for key, val in vars(flags).items():
         logger.info('{:16} {}'.format(key, val))
     log_config_to_file(cfg, logger=logger)
     if cfg.LOCAL_RANK == 0:
-        os.system('cp %s %s' % (args.cfg_file, output_dir))
+        os.system('cp %s %s' % (flags.cfg_file, output_dir))
 
     tb_log = SummaryWriter(log_dir=str(output_dir / 'tensorboard')) if cfg.LOCAL_RANK == 0 else None
 
@@ -104,16 +155,16 @@ def main():
     train_set, train_loader, train_sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
-        batch_size=args.batch_size,
-        dist=dist_train, workers=args.workers,
+        batch_size=flags.batch_size,
+        dist=dist_train, workers=flags.workers,
         logger=logger,
         training=True,
-        merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
-        total_epochs=args.epochs
+        merge_all_iters_to_one_epoch=flags.merge_all_iters_to_one_epoch,
+        total_epochs=flags.epochs
     )
 
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=train_set)
-    if args.sync_bn:
+    if flags.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda()
 
@@ -122,11 +173,11 @@ def main():
     # load checkpoint if it is possible
     start_epoch = it = 0
     last_epoch = -1
-    if args.pretrained_model is not None:
-        model.load_params_from_file(filename=args.pretrained_model, to_cpu=dist, logger=logger)
+    if flags.pretrained_model is not None:
+        model.load_params_from_file(filename=flags.pretrained_model, to_cpu=dist, logger=logger)
 
-    if args.ckpt is not None:
-        it, start_epoch = model.load_params_with_optimizer(args.ckpt, to_cpu=dist, optimizer=optimizer, logger=logger)
+    if flags.ckpt is not None:
+        it, start_epoch = model.load_params_with_optimizer(flags.ckpt, to_cpu=dist, optimizer=optimizer, logger=logger)
         last_epoch = start_epoch + 1
     else:
         ckpt_list = glob.glob(str(ckpt_dir / '*checkpoint_epoch_*.pth'))
@@ -143,13 +194,13 @@ def main():
     logger.info(model)
 
     lr_scheduler, lr_warmup_scheduler = build_scheduler(
-        optimizer, total_iters_each_epoch=len(train_loader), total_epochs=args.epochs,
+        optimizer, total_iters_each_epoch=len(train_loader), total_epochs=flags.epochs,
         last_epoch=last_epoch, optim_cfg=cfg.OPTIMIZATION
     )
 
     # -----------------------start training---------------------------
     logger.info('**********************Start training %s/%s(%s)**********************'
-                % (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
+                % (cfg.EXP_GROUP_PATH, cfg.TAG, flags.extra_tag))
     train_model(
         model,
         optimizer,
@@ -158,40 +209,40 @@ def main():
         lr_scheduler=lr_scheduler,
         optim_cfg=cfg.OPTIMIZATION,
         start_epoch=start_epoch,
-        total_epochs=args.epochs,
+        total_epochs=flags.epochs,
         start_iter=it,
         rank=cfg.LOCAL_RANK,
         tb_log=tb_log,
         ckpt_save_dir=ckpt_dir,
         train_sampler=train_sampler,
         lr_warmup_scheduler=lr_warmup_scheduler,
-        ckpt_save_interval=args.ckpt_save_interval,
-        max_ckpt_save_num=args.max_ckpt_save_num,
-        merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch
+        ckpt_save_interval=flags.ckpt_save_interval,
+        max_ckpt_save_num=flags.max_ckpt_save_num,
+        merge_all_iters_to_one_epoch=flags.merge_all_iters_to_one_epoch
     )
 
     logger.info('**********************End training %s/%s(%s)**********************\n\n\n'
-                % (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
+                % (cfg.EXP_GROUP_PATH, cfg.TAG, flags.extra_tag))
 
     logger.info('**********************Start evaluation %s/%s(%s)**********************' %
-                (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
+                (cfg.EXP_GROUP_PATH, cfg.TAG, flags.extra_tag))
     test_set, test_loader, sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
-        batch_size=args.batch_size,
-        dist=dist_train, workers=args.workers, logger=logger, training=False
+        batch_size=flags.batch_size,
+        dist=dist_train, workers=flags.workers, logger=logger, training=False
     )
     eval_output_dir = output_dir / 'eval' / 'eval_with_train'
     eval_output_dir.mkdir(parents=True, exist_ok=True)
-    args.start_epoch = max(args.epochs - 10, 0)  # Only evaluate the last 10 epochs
+    flags.start_epoch = max(flags.epochs - 10, 0)  # Only evaluate the last 10 epochs
 
     repeat_eval_ckpt(
         model.module if dist_train else model,
-        test_loader, args, eval_output_dir, logger, ckpt_dir,
+        test_loader, flags, eval_output_dir, logger, ckpt_dir,
         dist_test=dist_train
     )
     logger.info('**********************End evaluation %s/%s(%s)**********************' %
-                (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
+                (cfg.EXP_GROUP_PATH, cfg.TAG, flags.extra_tag))
 
 
 if __name__ == '__main__':

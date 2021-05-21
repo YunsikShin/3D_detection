@@ -157,32 +157,51 @@ cls_attr_dist = {
 }
 
 
-def get_available_scenes(nusc):
+def get_available_scenes(nusc, modality):
     available_scenes = []
+    can_black_list = [161, 162, 163, 164, 165, 166, 167, 168, 170, 171, 172, 173,
+                      174, 175, 176, 309, 310, 311, 312, 313, 314]
     print('total scene num:', len(nusc.scene))
     for scene in nusc.scene:
-        scene_token = scene['token']
-        scene_rec = nusc.get('scene', scene_token)
-        sample_rec = nusc.get('sample', scene_rec['first_sample_token'])
-        sd_rec = nusc.get('sample_data', sample_rec['data']['LIDAR_TOP'])
-        has_more_frames = True
-        scene_not_exist = False
-        while has_more_frames:
-            lidar_path, boxes, _ = nusc.get_sample_data(sd_rec['token'])
-            if not Path(lidar_path).exists():
-                scene_not_exist = True
-                break
-            else:
-                break
-            # if not sd_rec['next'] == '':
-            #     sd_rec = nusc.get('sample_data', sd_rec['next'])
-            # else:
-            #     has_more_frames = False
-        if scene_not_exist:
+        scene_id = int(scene['name'][-4:])
+        if modality == 'radar' and scene_id in can_black_list:
             continue
-        available_scenes.append(scene)
+        else:
+            scene_token = scene['token']
+            scene_rec = nusc.get('scene', scene_token)
+            sample_rec = nusc.get('sample', scene_rec['first_sample_token'])
+            sd_rec = nusc.get('sample_data', sample_rec['data']['LIDAR_TOP'])
+            has_more_frames = True
+            scene_not_exist = False
+            while has_more_frames:
+                lidar_path, boxes, _ = nusc.get_sample_data(sd_rec['token'])
+                if not Path(lidar_path).exists():
+                    scene_not_exist = True
+                    break
+                else:
+                    break
+                if not sd_rec['next'] == '':
+                    sd_rec = nusc.get('sample_data', sd_rec['next'])
+                else:
+                    has_more_frames = False
+            if scene_not_exist:
+                continue
+            available_scenes.append(scene)
     print('exist scene num:', len(available_scenes))
     return available_scenes
+
+
+def get_available_samples(nusc):
+    available_samples = []
+    can_black_list = [161, 162, 163, 164, 165, 166, 167, 168, 170, 171, 172, 173, 174, 175, 176, 309, 310, 311, 312, 313, 314]
+    for i in range(len(nusc.sample)):
+        scene_tk = nusc.sample[i]['scene_token']
+        scene_mask = int(nusc.get('scene',scene_tk)['name'][-4:])
+        if scene_mask in can_black_list:
+            continue
+        else:
+            available_samples.append(nusc.sample[i])
+    return available_samples
 
 
 def get_sample_data(nusc, sample_data_token, selected_anntokens=None):
@@ -262,7 +281,7 @@ def get_radar_data(nusc, nusc_can, sample, sweeps, sweep_version):
     scene_ = nusc.get('scene', sample['scene_token'])
     scenes_first_sample_token = scene_['first_sample_token']
 
-    points = np.zeros((18, 0))
+    all_pc = np.zeros((0, 18))
 
     sd_lidar = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
     cs_lidar = nusc.get('calibrated_sensor', sd_lidar['calibrated_sensor_token'])
@@ -340,10 +359,12 @@ def get_radar_data(nusc, nusc_can, sample, sweeps, sweep_version):
                 current_pc[:, :3] = current_pc[:, :3] @ R
                 current_pc[:, [8, 9]] = current_pc[:, [8, 9]] @ R[:2, :2]
                 current_pc[:, :3] += T
+                all_pc = np.vstack((all_pc, current_pc))
             elif sweep_version in ['versionx3']:
                 versionx3_pc[:, :3] = versionx3_pc[:, :3]
                 versionx3_pc[:, [8, 9]] = versionx3_pc[:, [8, 9]] @ R[:2, :2]
                 versionx3_pc[:, :3] += T
+                all_pc = np.vstack((all_pc, versionx3_pc))
             else:
                 raise NotImplementedError
             
@@ -359,11 +380,11 @@ def get_radar_data(nusc, nusc_can, sample, sweeps, sweep_version):
                     sd_radar = nusc.get('sample_data', sd_radar['prev'])
 
     if sweep_version in ['version1', 'version2', 'version3', 'versionx3']:
+        # Corresponds to x, y, z, RCS, vx_comp, vy_comp
         use_idx = [0, 1, 2, 5, 8, 9]
     else:
         raise NotImplementedError
     all_pc = all_pc[:, use_idx]
-    pdb.set_trace()
     return all_pc
 
 
@@ -376,7 +397,14 @@ def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test, max_swe
     ref_chan = 'LIDAR_TOP'  # The radar channel from which we track back n sweeps to aggregate the point cloud.
     chan = 'LIDAR_TOP'  # The reference channel of the current sample_rec that the point clouds are mapped to.
 
-    for index, sample in enumerate(nusc.sample):
+    if modality == 'lidar':
+        total_samples = nusc.sample
+    elif modality == 'radar':
+        total_samples = get_available_samples(nusc)
+    else:
+        raise NotImplementedError
+
+    for index, sample in enumerate(total_samples):
         progress_bar.update()
 
         lidar_token = sample['data']['LIDAR_TOP']
@@ -425,8 +453,10 @@ def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test, max_swe
         )
 
         info = {
-            'lidar_path': Path(ref_lidar_path).relative_to(data_path).__str__(),
-            'cam_front_path': Path(ref_cam_path).relative_to(data_path).__str__(),
+            'lidar_path': Path(lidar_path).relative_to(data_path).__str__(),
+            'radar_front_path': Path(radar_path).relative_to(data_path).__str__(),
+            'radar_path': Path(radar_sweep_path).relative_to(data_path).__str__(),
+            'cam_front_path': Path(cam_path).relative_to(data_path).__str__(),
             'cam_intrinsic': ref_cam_intrinsic,
             'token': sample['token'],
             'sweeps': [],
@@ -495,7 +525,16 @@ def fill_trainval_infos(data_path, nusc, train_scenes, val_scenes, test, max_swe
             # the filtering gives 0.5~1 map improvement
             num_lidar_pts = np.array([anno['num_lidar_pts'] for anno in annotations])
             num_radar_pts = np.array([anno['num_radar_pts'] for anno in annotations])
-            mask = (num_lidar_pts + num_radar_pts > 0)
+            if modality == 'lidar':
+                mask = (num_lidar_pts + num_radar_pts > 0)
+                info['point_filtered_num_gt_boxes_lidar'] = len(mask)
+            elif modality == 'radar':
+                mask_not_used = (num_lidar_pts + num_radar_pts > 0)
+                mask = (num_radar_pts > 0)
+                info['point_filtered_num_gt_boxes_lidar_radar'] = len(mask_not_used)
+                info['point_filtered_num_gt_boxes_only_radar'] = len(mask)
+            else:
+                raise NotImplementedError
 
             locs = np.array([b.center for b in ref_boxes]).reshape(-1, 3)
             dims = np.array([b.wlh for b in ref_boxes]).reshape(-1, 3)[:, [1, 0, 2]]  # wlh == > dxdydz (lwh)

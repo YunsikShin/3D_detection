@@ -179,7 +179,6 @@ MODEL:
                 'encode_angle_by_sincos': True
             }
 
-
         LOSS_CONFIG:
             REG_LOSS_TYPE: WeightedL1Loss
             LOSS_WEIGHTS: {

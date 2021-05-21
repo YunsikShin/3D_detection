@@ -1,7 +1,7 @@
 # SPA Lab
 ## Data Preprocessing
 
-Set your own 'dataset configs' at nuscenes_dataset.py
+Set your own `dataset configs` at nuscenes_dataset.py
 
 python3 -m pcdet.datasets.nuscenes.nuscenes_dataset --func create_nuscenes_infos --cfg_file tools/cfgs/dataset_configs/nuscenes_dataset.yaml --version v1.0-trainval
 

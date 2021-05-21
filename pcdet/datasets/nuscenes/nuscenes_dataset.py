@@ -1,6 +1,7 @@
 import copy
 import pickle
 from pathlib import Path
+import os
 import pdb
 
 import numpy as np
@@ -26,13 +27,15 @@ class NuScenesDataset(DatasetTemplate):
         self.logger.info('Loading NuScenes dataset')
         nuscenes_infos = []
 
-        for info_path in self.dataset_cfg.INFO_PATH[mode]:
-            info_path = self.root_path / info_path
-            if not info_path.exists():
-                continue
-            with open(info_path, 'rb') as f:
-                infos = pickle.load(f)
-                nuscenes_infos.extend(infos)
+        modality = self.dataset_cfg.MODALITY
+        max_sweeps = self.dataset_cfg.MAX_SWEEPS
+        sweep_version = self.dataset_cfg.SWEEP_VERSION
+
+        dir_infos = f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_{mode}.pkl'
+
+        with open(os.path.join(self.root_path, dir_infos), 'rb') as f:
+            infos = pickle.load(f)
+            nuscenes_infos.extend(infos)
 
         self.infos.extend(nuscenes_infos)
         self.logger.info('Total samples for NuScenes dataset: %d' % (len(nuscenes_infos)))
@@ -90,7 +93,7 @@ class NuScenesDataset(DatasetTemplate):
         cur_times = sweep_info['time_lag'] * np.ones((1, points_sweep.shape[1]))
         return points_sweep.T, cur_times.T
 
-    def get_lidar_with_sweeps(self, index, max_sweeps=1):
+    def get_lidar_with_sweeps(self, index, sweep_version, max_sweeps, num_features):
         info = self.infos[index]
         lidar_path = self.root_path / info['lidar_path']
         points = np.fromfile(str(lidar_path), dtype=np.float32, count=-1).reshape([-1, 5])[:, :4]
@@ -107,6 +110,12 @@ class NuScenesDataset(DatasetTemplate):
         times = np.concatenate(sweep_times_list, axis=0).astype(points.dtype)
 
         points = np.concatenate((points, times), axis=1)
+        return points
+
+    def get_radar_with_sweeps(self, index, sweep_version, max_sweeps, num_features):
+        info = self.infos[index]
+        radar_path = self.root_path / info['radar_path']
+        points = np.load(radar_path).reshape([-1, num_features])[:, :num_features]
         return points
 
     def __len__(self):
@@ -252,11 +261,14 @@ class NuScenesDataset(DatasetTemplate):
         result_str, result_dict = nuscenes_utils.format_nuscene_results(metrics, self.class_names, version=eval_version)
         return result_str, result_dict
 
-    def create_groundtruth_database(self, used_classes=None, max_sweeps=10):
+    def create_groundtruth_database(self, modality, sweep_version, used_classes=None, 
+                                    max_sweeps=10):
         import torch
 
-        database_save_path = self.root_path / f'gt_database_{max_sweeps}sweeps_withvelo'
-        db_info_save_path = self.root_path / f'nuscenes_dbinfos_{max_sweeps}sweeps_withvelo.pkl'
+        database_save_path = self.root_path / f'gt_database_{modality}_{sweep_version}_{max_sweeps}sweeps_withvelo'
+        db_info_save_path = self.root_path / f'nuscenes_dbinfos_{modality}_{sweep_version}_{max_sweeps}sweeps_withvelo.pkl'
+
+        num_features = 6
 
         database_save_path.mkdir(parents=True, exist_ok=True)
         all_db_infos = {}
@@ -264,7 +276,10 @@ class NuScenesDataset(DatasetTemplate):
         for idx in tqdm(range(len(self.infos))):
             sample_idx = idx
             info = self.infos[idx]
-            points = self.get_lidar_with_sweeps(idx, max_sweeps=max_sweeps)
+            points = getattr(self, f'get_{modality}_with_sweeps')(
+                idx, num_features=num_features, sweep_version=sweep_version,
+                max_sweeps=max_sweeps
+            )
             gt_boxes = info['gt_boxes']
             gt_names = info['gt_names']
 
@@ -320,7 +335,7 @@ def create_nuscenes_info(modality, version, sweep_version, max_sweeps, data_path
 
     nusc = NuScenes(version=version, dataroot=data_path, verbose=True)
     nusc_can = NuScenesCanBus(dataroot=data_path)
-    available_scenes = nuscenes_utils.get_available_scenes(nusc)
+    available_scenes = nuscenes_utils.get_available_scenes(nusc, modality)
     available_scene_names = [s['name'] for s in available_scenes]
     train_scenes = list(filter(lambda x: x in available_scene_names, train_scenes))
     val_scenes = list(filter(lambda x: x in available_scene_names, val_scenes))
@@ -337,13 +352,13 @@ def create_nuscenes_info(modality, version, sweep_version, max_sweeps, data_path
 
     if version == 'v1.0-test':
         print('test sample: %d' % len(train_nusc_infos))
-        with open(save_path / f'nuscenes_infos_{max_sweeps}sweeps_test.pkl', 'wb') as f:
+        with open(save_path / f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_test.pkl', 'wb') as f:
             pickle.dump(train_nusc_infos, f)
     else:
         print('train sample: %d, val sample: %d' % (len(train_nusc_infos), len(val_nusc_infos)))
-        with open(save_path / f'nuscenes_infos_{max_sweeps}sweeps_train.pkl', 'wb') as f:
+        with open(save_path / f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_train.pkl', 'wb') as f:
             pickle.dump(train_nusc_infos, f)
-        with open(save_path / f'nuscenes_infos_{max_sweeps}sweeps_val.pkl', 'wb') as f:
+        with open(save_path / f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_val.pkl', 'wb') as f:
             pickle.dump(val_nusc_infos, f)
 
 
@@ -360,7 +375,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--modality', type=str, default='radar')
     parser.add_argument('--max_sweeps', type=int, default=13)
-    parser.add_argument('--sweep_version', type=str, default='version1')
+    parser.add_argument('--sweep_version', type=str, default='version2')
     parser.add_argument('--dir_data', type=str, default='/mnt/mnt/sdd/ysshin/nuscenes')
     flags = parser.parse_args()
 
