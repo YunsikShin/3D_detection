@@ -1,9 +1,12 @@
 import glob
 import os
+import pdb
 
 import torch
 import tqdm
 from torch.nn.utils import clip_grad_norm_
+
+from eval_utils.eval_utils import eval_one_epoch
 
 
 def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, accumulated_iter, optim_cfg,
@@ -14,7 +17,8 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
     if rank == 0:
         pbar = tqdm.tqdm(total=total_it_each_epoch, leave=leave_pbar, desc='train', dynamic_ncols=True)
 
-    for cur_it in range(total_it_each_epoch):
+    #for cur_it in range(total_it_each_epoch):
+    for cur_it in range(100):
         try:
             batch = next(dataloader_iter)
         except StopIteration:
@@ -61,10 +65,10 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
     return accumulated_iter
 
 
-def train_model(model, optimizer, train_loader, model_func, lr_scheduler, optim_cfg,
-                start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir, train_sampler=None,
+def train_model(cfg, model, optimizer, train_loader, test_loader, model_func, lr_scheduler, optim_cfg,
+                start_epoch, total_epochs, start_iter, rank, logger, tb_log, ckpt_save_dir, train_sampler=None,
                 lr_warmup_scheduler=None, ckpt_save_interval=1, max_ckpt_save_num=50,
-                merge_all_iters_to_one_epoch=False):
+                merge_all_iters_to_one_epoch=False, result_dir=None):
     accumulated_iter = start_iter
     with tqdm.trange(start_epoch, total_epochs, desc='epochs', dynamic_ncols=True, leave=(rank == 0)) as tbar:
         total_it_each_epoch = len(train_loader)
@@ -100,14 +104,23 @@ def train_model(model, optimizer, train_loader, model_func, lr_scheduler, optim_
                 ckpt_list = glob.glob(str(ckpt_save_dir / 'checkpoint_epoch_*.pth'))
                 ckpt_list.sort(key=os.path.getmtime)
 
-                if ckpt_list.__len__() >= max_ckpt_save_num:
-                    for cur_file_idx in range(0, len(ckpt_list) - max_ckpt_save_num + 1):
-                        os.remove(ckpt_list[cur_file_idx])
+                #if ckpt_list.__len__() >= max_ckpt_save_num:
+                #    for cur_file_idx in range(0, len(ckpt_list) - max_ckpt_save_num + 1):
+                #        os.remove(ckpt_list[cur_file_idx])
 
                 ckpt_name = ckpt_save_dir / ('checkpoint_epoch_%d' % trained_epoch)
                 save_checkpoint(
                     checkpoint_state(model, optimizer, trained_epoch, accumulated_iter), filename=ckpt_name,
                 )
+
+                pdb.set_trace()
+                train_ret_dict = eval_one_epoch(cfg, model, train_loader, cur_epoch, logger, 
+                                                dist_test=False, result_dir=result_dir)
+                test_ret_dict = eval_one_epoch(cfg, model, test_loader, cur_epoch, logger, 
+                                                dist_test=False, result_dir=result_dir)
+                pdb.set_trace()
+
+
 
 
 def model_state_to_cpu(model_state):

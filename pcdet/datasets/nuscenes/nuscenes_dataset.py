@@ -31,6 +31,9 @@ class NuScenesDataset(DatasetTemplate):
         max_sweeps = self.dataset_cfg.MAX_SWEEPS
         sweep_version = self.dataset_cfg.SWEEP_VERSION
 
+        if mode == 'test':
+            mode = 'val'
+
         dir_infos = f'{modality}_infos_{sweep_version}_{max_sweeps}sweeps_{mode}.pkl'
 
         with open(os.path.join(self.root_path, dir_infos), 'rb') as f:
@@ -129,7 +132,14 @@ class NuScenesDataset(DatasetTemplate):
             index = index % len(self.infos)
 
         info = copy.deepcopy(self.infos[index])
-        points = self.get_lidar_with_sweeps(index, max_sweeps=self.dataset_cfg.MAX_SWEEPS)
+        modality = self.dataset_cfg.MODALITY
+        sweep_version = self.dataset_cfg.SWEEP_VERSION
+        max_sweeps = self.dataset_cfg.MAX_SWEEPS
+
+        points = getattr(self, f'get_{modality}_with_sweeps')(index,
+                                                              sweep_version=sweep_version,
+                                                              max_sweeps=max_sweeps,
+                                                              num_features=6)
 
         input_dict = {
             'points': points,
@@ -155,8 +165,8 @@ class NuScenesDataset(DatasetTemplate):
             gt_boxes[np.isnan(gt_boxes)] = 0
             data_dict['gt_boxes'] = gt_boxes
 
-        if not self.dataset_cfg.PRED_VELOCITY and 'gt_boxes' in data_dict:
-            data_dict['gt_boxes'] = data_dict['gt_boxes'][:, [0, 1, 2, 3, 4, 5, 6, -1]]
+        #if not self.dataset_cfg.PRED_VELOCITY and 'gt_boxes' in data_dict:
+        #    data_dict['gt_boxes'] = data_dict['gt_boxes'][:, [0, 1, 2, 3, 4, 5, 6, -1]]
 
         return data_dict
 

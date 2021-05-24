@@ -1,4 +1,5 @@
 import pickle
+import pdb
 
 import numpy as np
 
@@ -16,11 +17,10 @@ class DataBaseSampler(object):
         for class_name in class_names:
             self.db_infos[class_name] = []
 
-        for db_info_path in sampler_cfg.DB_INFO_PATH:
-            db_info_path = self.root_path.resolve() / db_info_path
-            with open(str(db_info_path), 'rb') as f:
-                infos = pickle.load(f)
-                [self.db_infos[cur_class].extend(infos[cur_class]) for cur_class in class_names]
+        db_info_path = self.root_path.resolve() / sampler_cfg.DB_INFO_PATH
+        with open(str(db_info_path), 'rb') as f:
+            infos = pickle.load(f)
+            [self.db_infos[cur_class].extend(infos[cur_class]) for cur_class in class_names]
 
         for func_name, val in sampler_cfg.PREPARE.items():
             self.db_infos = getattr(self, func_name)(self.db_infos, val)
@@ -130,7 +130,8 @@ class DataBaseSampler(object):
         obj_points_list = []
         for idx, info in enumerate(total_valid_sampled_dict):
             file_path = self.root_path / info['path']
-            obj_points = np.fromfile(str(file_path), dtype=np.float32).reshape(
+            dtype = np.float64 if self.sampler_cfg.NUM_POINT_FEATURES == 6 else np.float32
+            obj_points = np.fromfile(str(file_path), dtype=dtype).reshape(
                 [-1, self.sampler_cfg.NUM_POINT_FEATURES])
 
             obj_points[:, :3] += info['box3d_lidar'][:3]

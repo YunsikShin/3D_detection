@@ -22,6 +22,10 @@ from train_utils.train_utils import train_model
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/cbgs_pp_multihead.yaml', help='specify the config for training')
+    #parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/cbgs_second_multihead.yaml', help='specify the config for training')
+    #parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/pv_rcnn.yaml', help='specify the config for training')
+
+    parser.add_argument('--gpu', type=int, default=0)
 
     parser.add_argument('--modality', type=str, default='radar')
     parser.add_argument('--sweep_version', type=str, default='version2')
@@ -102,6 +106,9 @@ def cfg_update(flags, cfg):
     #cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['PREPARE'] = PREPARE_list
     #cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['SAMPLE_GROUPS'] = SAMPLE_GROUPS_list
     #cfg.MODEL.DENSE_HEAD.ANCHOR_GENERATOR_CONFIG = DENSE_HEAD_list
+
+    if modality == 'radar':
+        cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0].NUM_POINT_FEATURES = 6
     return cfg
 
 
@@ -128,7 +135,7 @@ def main():
     if flags.fix_random_seed:
         common_utils.set_random_seed(666)
 
-    output_dir = Path('/mnt/mnt/ysshin/nuscenes') / 'output' / cfg.TAG / flags.extra_tag
+    output_dir = Path('/mnt/mnt/sdd/ysshin/nuscenes') / 'output' / cfg.TAG / flags.extra_tag
     ckpt_dir = output_dir / 'ckpt'
     output_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -140,6 +147,7 @@ def main():
     logger.info('**********************Start logging**********************')
     gpu_list = os.environ['CUDA_VISIBLE_DEVICES'] if 'CUDA_VISIBLE_DEVICES' in os.environ.keys() else 'ALL'
     logger.info('CUDA_VISIBLE_DEVICES=%s' % gpu_list)
+    os.environ['CUDA_VISIBLE_DEVICES']="%d"%flags.gpu
 
     if dist_train:
         logger.info('total_batch_size: %d' % (total_gpus * flags.batch_size))
@@ -162,6 +170,28 @@ def main():
         merge_all_iters_to_one_epoch=flags.merge_all_iters_to_one_epoch,
         total_epochs=flags.epochs
     )
+    test_set, test_loader, test_sampler = build_dataloader(
+        dataset_cfg=cfg.DATA_CONFIG,
+        class_names=cfg.CLASS_NAMES,
+        batch_size=flags.batch_size,
+        dist=dist_train, workers=flags.workers,
+        logger=logger,
+        training=False,
+        merge_all_iters_to_one_epoch=flags.merge_all_iters_to_one_epoch,
+        total_epochs=flags.epochs
+    )
+
+    #import numpy as np
+    #nan_sum = 0
+    #for i in range(train_set.__len__()):
+    #    data_dict = train_set.__getitem__(i)
+    #    nan_sum += np.sum(np.isnan(data_dict['points']))
+    #    print(nan_sum)
+    #print('nan', nan_sum)
+    #pdb.set_trace()
+
+    eval_output_dir = output_dir / 'eval'
+    eval_output_dir = eval_output_dir / 'eval_all_default'
 
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=train_set)
     if flags.sync_bn:
@@ -202,9 +232,11 @@ def main():
     logger.info('**********************Start training %s/%s(%s)**********************'
                 % (cfg.EXP_GROUP_PATH, cfg.TAG, flags.extra_tag))
     train_model(
+        cfg,
         model,
         optimizer,
         train_loader,
+        test_loader,
         model_func=model_fn_decorator(),
         lr_scheduler=lr_scheduler,
         optim_cfg=cfg.OPTIMIZATION,
@@ -212,13 +244,15 @@ def main():
         total_epochs=flags.epochs,
         start_iter=it,
         rank=cfg.LOCAL_RANK,
+        logger=logger,
         tb_log=tb_log,
         ckpt_save_dir=ckpt_dir,
         train_sampler=train_sampler,
         lr_warmup_scheduler=lr_warmup_scheduler,
         ckpt_save_interval=flags.ckpt_save_interval,
         max_ckpt_save_num=flags.max_ckpt_save_num,
-        merge_all_iters_to_one_epoch=flags.merge_all_iters_to_one_epoch
+        merge_all_iters_to_one_epoch=flags.merge_all_iters_to_one_epoch,
+        result_dir=eval_output_dir
     )
 
     logger.info('**********************End training %s/%s(%s)**********************\n\n\n'
