@@ -1,8 +1,8 @@
-CLASS_NAMES: ['Car', 'Pedestrian', 'Cyclist']
+CLASS_NAMES: ['car', 'pedestrian', 'bicycle']
 
 DATA_CONFIG: 
-    _BASE_CONFIG_: cfgs/dataset_configs/kitti_dataset.yaml
-    POINT_CLOUD_RANGE: [0, -39.68, -3, 69.12, 39.68, 1]
+    _BASE_CONFIG_: cfgs/dataset_configs/nuscenes_dataset.yaml
+    POINT_CLOUD_RANGE: [-51.2, -51.2, -5, 51.2, 51.2, 3]
     DATA_PROCESSOR:
         - NAME: mask_points_and_boxes_outside_range
           REMOVE_OUTSIDE_BOXES: True
@@ -14,7 +14,7 @@ DATA_CONFIG:
           }
 
         - NAME: transform_points_to_voxels
-          VOXEL_SIZE: [0.16, 0.16, 4]
+          VOXEL_SIZE: [0.5, 0.5, 8.0]
           MAX_POINTS_PER_VOXEL: 32
           MAX_NUMBER_OF_VOXELS: {
             'train': 16000,
@@ -28,11 +28,10 @@ DATA_CONFIG:
               DB_INFO_PATH:
                   - kitti_dbinfos_train.pkl
               PREPARE: {
-                 filter_by_min_points: ['Car:5', 'Pedestrian:5', 'Cyclist:5'],
-                 filter_by_difficulty: [-1],
+                 filter_by_min_points: ['car:1', 'pedestrian:1', 'bicycle:1']
               }
 
-              SAMPLE_GROUPS: ['Car:15','Pedestrian:15', 'Cyclist:15']
+              SAMPLE_GROUPS: ['car:15','pedestrian:15', 'bicycle:15']
               NUM_POINT_FEATURES: 4
               DATABASE_WITH_FAKELIDAR: False
               REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
@@ -80,7 +79,7 @@ MODEL:
 
         ANCHOR_GENERATOR_CONFIG: [
             {
-                'class_name': 'Car',
+                'class_name': 'car',
                 'anchor_sizes': [[3.9, 1.6, 1.56]],
                 'anchor_rotations': [0, 1.57],
                 'anchor_bottom_heights': [-1.78],
@@ -90,7 +89,7 @@ MODEL:
                 'unmatched_threshold': 0.45
             },
             {
-                'class_name': 'Pedestrian',
+                'class_name': 'pedestrian',
                 'anchor_sizes': [[0.8, 0.6, 1.73]],
                 'anchor_rotations': [0, 1.57],
                 'anchor_bottom_heights': [-0.6],
@@ -100,7 +99,7 @@ MODEL:
                 'unmatched_threshold': 0.35
             },
             {
-                'class_name': 'Cyclist',
+                'class_name': 'bicycle',
                 'anchor_sizes': [[1.76, 0.6, 1.73]],
                 'anchor_rotations': [0, 1.57],
                 'anchor_bottom_heights': [-0.6],

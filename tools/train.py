@@ -21,18 +21,21 @@ from train_utils.train_utils import train_model
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
-    parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/cbgs_pp_multihead.yaml', help='specify the config for training')
+    #parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/cbgs_pp_multihead.yaml', help='specify the config for training')
+    #parser.add_argument('--cfg_file', type=str, default='cfgs/kitti_models/pointpillar.yaml', help='specify the config for training')
     #parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/cbgs_second_multihead.yaml', help='specify the config for training')
-    #parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/pv_rcnn.yaml', help='specify the config for training')
+    parser.add_argument('--cfg_file', type=str, default='cfgs/nuscenes_models/pv_rcnn.yaml', help='specify the config for training')
 
     parser.add_argument('--gpu', type=int, default=0)
 
     parser.add_argument('--modality', type=str, default='radar')
     parser.add_argument('--sweep_version', type=str, default='version2')
     parser.add_argument('--max_sweeps', type=int, default=13)
+    #parser.add_argument('--class_names', type=list, 
+    #                    default=['car', 'truck', 'construction_vehicle', 'bus', 'trailer',
+    #                             'barrier', 'motorcycle', 'bicycle', 'pedestrain', 'traffic_cone'])
     parser.add_argument('--class_names', type=list, 
-                        default=['car', 'truck', 'construction_vehicle', 'bus', 'trailer',
-                                 'barrier', 'motorcycle', 'bicycle', 'pedestrain', 'traffic_cone'])
+                        default=['car', 'pedestrian', 'bicycle'])
 
     parser.add_argument('--batch_size', type=int, default=None, required=False, help='batch size for training')
     parser.add_argument('--epochs', type=int, default=None, required=False, help='number of epochs to train for')
@@ -43,7 +46,7 @@ def parse_config():
     parser.add_argument('--launcher', choices=['none', 'pytorch', 'slurm'], default='none')
     parser.add_argument('--tcp_port', type=int, default=18888, help='tcp port for distrbuted training')
     parser.add_argument('--sync_bn', action='store_true', default=False, help='whether to use sync bn')
-    parser.add_argument('--fix_random_seed', action='store_true', default=False, help='')
+    parser.add_argument('--fix_random_seed', action='store_true', default=True, help='')
     parser.add_argument('--ckpt_save_interval', type=int, default=1, help='number of training epochs')
     parser.add_argument('--local_rank', type=int, default=0, help='local rank for distributed training')
     parser.add_argument('--max_ckpt_save_num', type=int, default=30, help='max number of saved checkpoint')
@@ -85,13 +88,13 @@ def cfg_update(flags, cfg):
     cfg.DATA_CONFIG.INFO_PATH = {'train': dir_info_train, 'test': dir_info_val}
     cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0].DB_INFO_PATH = dir_dbinfo
 
-    ## Re-define CFG w.r.t. num_class
+    # Re-define CFG w.r.t. num_class
     PREPARE = cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['PREPARE']
-    #SAMPLE_GROUPS = cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['SAMPLE_GROUPS']
-    #DENSE_HEAD = cfg.MODEL.DENSE_HEAD.ANCHOR_GENERATOR_CONFIG
+    SAMPLE_GROUPS = cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['SAMPLE_GROUPS']
+    DENSE_HEAD = cfg.MODEL.DENSE_HEAD.ANCHOR_GENERATOR_CONFIG
     PREPARE_list = []
-    #SAMPLE_GROUPS_list = []
-    #DENSE_HEAD_list = []
+    SAMPLE_GROUPS_list = []
+    DENSE_HEAD_list = []
     for i in range(num_class):
         # DATA_AUGMENTOR
         item = PREPARE['filter_by_min_points'][i]
@@ -101,11 +104,11 @@ def cfg_update(flags, cfg):
         PREPARE_list.append
         PREPARE_list.append(':'.join([name, str(num)]))
 
-    #    SAMPLE_GROUPS_list.append(SAMPLE_GROUPS[i])
-    #    DENSE_HEAD_list.append(DENSE_HEAD[i])
-    #cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['PREPARE'] = PREPARE_list
-    #cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['SAMPLE_GROUPS'] = SAMPLE_GROUPS_list
-    #cfg.MODEL.DENSE_HEAD.ANCHOR_GENERATOR_CONFIG = DENSE_HEAD_list
+        SAMPLE_GROUPS_list.append(SAMPLE_GROUPS[i])
+        DENSE_HEAD_list.append(DENSE_HEAD[i])
+    cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['PREPARE'] = {'filter_by_min_points': PREPARE_list}
+    cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0]['SAMPLE_GROUPS'] = SAMPLE_GROUPS_list
+    cfg.MODEL.DENSE_HEAD.ANCHOR_GENERATOR_CONFIG = DENSE_HEAD_list
 
     if modality == 'radar':
         cfg.DATA_CONFIG.DATA_AUGMENTOR.AUG_CONFIG_LIST[0].NUM_POINT_FEATURES = 6
@@ -115,6 +118,7 @@ def cfg_update(flags, cfg):
 def main():
     flags, cfg = parse_config()
     cfg = cfg_update(flags, cfg)
+
     if flags.launcher == 'none':
         dist_train = False
         total_gpus = 1
@@ -180,15 +184,6 @@ def main():
         merge_all_iters_to_one_epoch=flags.merge_all_iters_to_one_epoch,
         total_epochs=flags.epochs
     )
-
-    #import numpy as np
-    #nan_sum = 0
-    #for i in range(train_set.__len__()):
-    #    data_dict = train_set.__getitem__(i)
-    #    nan_sum += np.sum(np.isnan(data_dict['points']))
-    #    print(nan_sum)
-    #print('nan', nan_sum)
-    #pdb.set_trace()
 
     eval_output_dir = output_dir / 'eval'
     eval_output_dir = eval_output_dir / 'eval_all_default'

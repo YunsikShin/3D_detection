@@ -1,3 +1,5 @@
+import pdb
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -197,7 +199,7 @@ class RoIHeadTemplate(nn.Module):
     def get_box_cls_layer_loss(self, forward_ret_dict):
         loss_cfgs = self.model_cfg.LOSS_CONFIG
         rcnn_cls = forward_ret_dict['rcnn_cls']
-        rcnn_cls_labels = forward_ret_dict['rcnn_cls_labels'].view(-1)
+        rcnn_cls_labels = forward_ret_dict['rcnn_cls_labels'].view(-1) 
         if loss_cfgs.CLS_LOSS == 'BinaryCrossEntropy':
             rcnn_cls_flat = rcnn_cls.view(-1)
             batch_loss_cls = F.binary_cross_entropy(torch.sigmoid(rcnn_cls_flat), rcnn_cls_labels.float(), reduction='none')

@@ -1,3 +1,5 @@
+import pdb
+
 import torch
 import torch.nn as nn
 
@@ -92,7 +94,7 @@ class VoxelSetAbstraction(nn.Module):
             c_in += sum([x[-1] for x in mlps])
 
         self.vsa_point_feature_fusion = nn.Sequential(
-            nn.Linear(c_in, self.model_cfg.NUM_OUTPUT_FEATURES, bias=False),
+            nn.Linear(640, self.model_cfg.NUM_OUTPUT_FEATURES, bias=False),
             nn.BatchNorm1d(self.model_cfg.NUM_OUTPUT_FEATURES),
             nn.ReLU(),
         )
@@ -142,7 +144,7 @@ class VoxelSetAbstraction(nn.Module):
 
                 if sampled_points.shape[1] < self.model_cfg.NUM_KEYPOINTS:
                     empty_num = self.model_cfg.NUM_KEYPOINTS - sampled_points.shape[1]
-                    cur_pt_idxs[0, -empty_num:] = cur_pt_idxs[0, :empty_num]
+                    cur_pt_idxs[0, -empty_num:] = cur_pt_idxs[0, :empty_num].clone()
 
                 keypoints = sampled_points[0][cur_pt_idxs[0]].unsqueeze(dim=0)
 

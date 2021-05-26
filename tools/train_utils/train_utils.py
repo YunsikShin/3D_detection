@@ -17,8 +17,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
     if rank == 0:
         pbar = tqdm.tqdm(total=total_it_each_epoch, leave=leave_pbar, desc='train', dynamic_ncols=True)
 
-    #for cur_it in range(total_it_each_epoch):
-    for cur_it in range(100):
+    for cur_it in range(total_it_each_epoch):
         try:
             batch = next(dataloader_iter)
         except StopIteration:
@@ -42,6 +41,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
         loss, tb_dict, disp_dict = model_func(model, batch)
 
         loss.backward()
+
         clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
         optimizer.step()
 
@@ -112,15 +112,10 @@ def train_model(cfg, model, optimizer, train_loader, test_loader, model_func, lr
                 save_checkpoint(
                     checkpoint_state(model, optimizer, trained_epoch, accumulated_iter), filename=ckpt_name,
                 )
-
-                pdb.set_trace()
-                train_ret_dict = eval_one_epoch(cfg, model, train_loader, cur_epoch, logger, 
-                                                dist_test=False, result_dir=result_dir)
+                #train_ret_dict = eval_one_epoch(cfg, model, train_loader, cur_epoch, logger, 
+                #                                dist_test=False, result_dir=result_dir)
                 test_ret_dict = eval_one_epoch(cfg, model, test_loader, cur_epoch, logger, 
-                                                dist_test=False, result_dir=result_dir)
-                pdb.set_trace()
-
-
+                                               dist_test=False, result_dir=result_dir)
 
 
 def model_state_to_cpu(model_state):

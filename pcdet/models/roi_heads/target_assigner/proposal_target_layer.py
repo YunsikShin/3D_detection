@@ -1,3 +1,5 @@
+import pdb
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -110,7 +112,7 @@ class ProposalTargetLayer(nn.Module):
             batch_roi_labels[index] = cur_roi_labels[sampled_inds]
             batch_roi_ious[index] = max_overlaps[sampled_inds]
             batch_roi_scores[index] = cur_roi_scores[sampled_inds]
-            batch_gt_of_rois[index] = cur_gt[gt_assignment[sampled_inds]]
+            batch_gt_of_rois[index] = cur_gt[gt_assignment[sampled_inds]][:, :8]
 
         return batch_rois, batch_gt_of_rois, batch_roi_ious, batch_roi_scores, batch_roi_labels
 

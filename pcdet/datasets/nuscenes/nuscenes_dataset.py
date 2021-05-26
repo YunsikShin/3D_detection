@@ -149,7 +149,7 @@ class NuScenesDataset(DatasetTemplate):
 
         if 'gt_boxes' in info:
             if self.dataset_cfg.get('FILTER_MIN_POINTS_IN_GT', False):
-                mask = (info['num_lidar_pts'] > self.dataset_cfg.FILTER_MIN_POINTS_IN_GT - 1)
+                mask = (info['num_radar_pts'] > self.dataset_cfg.FILTER_MIN_POINTS_IN_GT - 1)
             else:
                 mask = None
 

@@ -1,3 +1,5 @@
+import pdb
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -65,6 +67,8 @@ class PointHeadTemplate(nn.Module):
             point_box_labels: (N1 + N2 + N3 + ..., code_size)
 
         """
+        gt_boxes = gt_boxes[:, :, :8]
+        extend_gt_boxes = extend_gt_boxes[:, :, :8]
         assert len(points.shape) == 2 and points.shape[1] == 4, 'points.shape=%s' % str(points.shape)
         assert len(gt_boxes.shape) == 3 and gt_boxes.shape[2] == 8, 'gt_boxes.shape=%s' % str(gt_boxes.shape)
         assert extend_gt_boxes is None or len(extend_gt_boxes.shape) == 3 and extend_gt_boxes.shape[2] == 8, \

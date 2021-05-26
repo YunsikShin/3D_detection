@@ -17,7 +17,7 @@ DATA_CONFIG:
 
         -   NAME: transform_points_to_voxels
             VOXEL_SIZE: [0.5, 0.5, 8.0]
-            MAX_POINTS_PER_VOXEL: 20
+            MAX_POINTS_PER_VOXEL: 10
             MAX_NUMBER_OF_VOXELS: {
                 'train': 30000,
                 'test': 30000
@@ -197,7 +197,6 @@ MODEL:
                 'encode_angle_by_sincos': True
             }
 
-
         LOSS_CONFIG:
             REG_LOSS_TYPE: WeightedL1Loss
             LOSS_WEIGHTS: {
@@ -226,7 +225,7 @@ MODEL:
 
 OPTIMIZATION:
     BATCH_SIZE_PER_GPU: 32
-    NUM_EPOCHS: 20
+    NUM_EPOCHS: 30
 
     OPTIMIZER: adam_onecycle
     LR: 0.005

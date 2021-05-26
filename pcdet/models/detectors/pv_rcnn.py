@@ -1,3 +1,5 @@
+import pdb
+
 from .detector3d_template import Detector3DTemplate
 
 

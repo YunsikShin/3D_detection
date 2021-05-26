@@ -1,3 +1,5 @@
+import pdb
+
 import numpy as np
 
 
@@ -7,6 +9,7 @@ class PointFeatureEncoder(object):
         self.point_encoding_config = config
         assert list(self.point_encoding_config.src_feature_list[0:3]) == ['x', 'y', 'z']
         self.used_feature_list = self.point_encoding_config.used_feature_list
+        self.used_feature_list = ['x', 'y', 'z', 'RCS', 'vx', 'vy', 'intensity', 'timestamp']
         self.src_feature_list = self.point_encoding_config.src_feature_list
         self.point_cloud_range = point_cloud_range
 
@@ -37,9 +40,9 @@ class PointFeatureEncoder(object):
             num_output_features = len(self.used_feature_list)
             return num_output_features
 
-        point_feature_list = [points[:, 0:3]]
+        point_feature_list = [points[:, 0:6]]
         for x in self.used_feature_list:
-            if x in ['x', 'y', 'z']:
+            if x in ['x', 'y', 'z', 'RCS', 'vx', 'vy']:
                 continue
             idx = self.src_feature_list.index(x)
             point_feature_list.append(points[:, idx:idx+1])

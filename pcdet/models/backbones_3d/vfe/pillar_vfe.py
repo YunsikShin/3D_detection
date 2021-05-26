@@ -1,3 +1,5 @@
+import pdb
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -56,7 +58,7 @@ class PillarVFE(VFETemplate):
         self.use_norm = self.model_cfg.USE_NORM
         self.with_distance = self.model_cfg.WITH_DISTANCE
         self.use_absolute_xyz = self.model_cfg.USE_ABSLOTE_XYZ
-        num_point_features += 6 if self.use_absolute_xyz else 3
+        num_point_features += 12 if self.use_absolute_xyz else 3
         if self.with_distance:
             num_point_features += 1
 
@@ -67,6 +69,7 @@ class PillarVFE(VFETemplate):
         pfn_layers = []
         for i in range(len(num_filters) - 1):
             in_filters = num_filters[i]
+            in_filters = 17
             out_filters = num_filters[i + 1]
             pfn_layers.append(
                 PFNLayer(in_filters, out_filters, self.use_norm, last_layer=(i >= len(num_filters) - 2))
@@ -94,8 +97,8 @@ class PillarVFE(VFETemplate):
     def forward(self, batch_dict, **kwargs):
   
         voxel_features, voxel_num_points, coords = batch_dict['voxels'], batch_dict['voxel_num_points'], batch_dict['voxel_coords']
-        points_mean = voxel_features[:, :, :3].sum(dim=1, keepdim=True) / voxel_num_points.type_as(voxel_features).view(-1, 1, 1)
-        f_cluster = voxel_features[:, :, :3] - points_mean
+        points_mean = voxel_features[:, :, :6].sum(dim=1, keepdim=True) / voxel_num_points.type_as(voxel_features).view(-1, 1, 1)
+        f_cluster = voxel_features[:, :, :6] - points_mean
 
         f_center = torch.zeros_like(voxel_features[:, :, :3])
         f_center[:, :, 0] = voxel_features[:, :, 0] - (coords[:, 3].to(voxel_features.dtype).unsqueeze(1) * self.voxel_x + self.x_offset)

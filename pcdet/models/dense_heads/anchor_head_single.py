@@ -1,3 +1,5 @@
+import pdb
+
 import numpy as np
 import torch.nn as nn
 
@@ -58,8 +60,13 @@ class AnchorHeadSingle(AnchorHeadTemplate):
             dir_cls_preds = None
 
         if self.training:
+            import torch
+            gt_boxes = data_dict['gt_boxes']
+            box_features = gt_boxes[:, :, :7]
+            classes = torch.unsqueeze(gt_boxes[:, :, -1], -1)
+            gt_boxes = torch.cat((box_features, classes), axis=-1)
             targets_dict = self.assign_targets(
-                gt_boxes=data_dict['gt_boxes']
+                gt_boxes=gt_boxes
             )
             self.forward_ret_dict.update(targets_dict)
 
